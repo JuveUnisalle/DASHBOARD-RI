@@ -303,10 +303,11 @@ function Dashboard({ scriptsLoaded, onHome }) {
                 // Si pones el excel en la carpeta "public" de Vercel, la ruta es "/datos.xlsx"
                 const fileUrl = '/datos.xlsx'; 
                 
-                const response = await fetch(fileUrl);
+                // Añadimos '?t=' con la hora actual para FORZAR al navegador a no usar la caché
+                const response = await fetch(fileUrl + '?t=' + new Date().getTime());
                 
                 if (!response.ok) {
-                    throw new Error('Archivo no encontrado o error de red');
+                    throw new Error(`HTTP ${response.status} (No encontrado)`);
                 }
 
                 const arrayBuffer = await response.arrayBuffer();
@@ -315,8 +316,9 @@ function Dashboard({ scriptsLoaded, onHome }) {
                 setStatus('✅ ¡Dashboard Auto-Alimentado!');
                 setTimeout(() => setStatus('Datos listos'), 3000);
             } catch (err) {
-                console.warn('Carga automática omitida. Se requiere carga manual.', err);
-                setStatus('⚠️ Esperando archivo manual');
+                console.warn('Fallo auto-carga:', err);
+                // Ahora mostrará el error exacto en la pantalla al lado del botón
+                setStatus(`⚠️ Falló: ${err.message}`);
             } finally {
                 setIsLoading(false);
                 setAutoLoaded(true); // Evitar re-intentos
