@@ -258,17 +258,16 @@ function Dashboard({ scriptsLoaded, onHome }) {
     const [status, setStatus] = useState('Esperando archivo Excel...');
     const [isLoading, setIsLoading] = useState(false);
     const [dataState, setDataState] = useState({ bNuevas: [], dNuevas: [], bViejas: [], dViejas: [] });
-    const [autoLoaded, setAutoLoaded] = useState(false); // Bandera para evitar re-cargas múltiples
+    const [autoLoaded, setAutoLoaded] = useState(false); // Evita re-cargas múltiples
 
     const emptyFilters = { CIUDAD: '', REGIONAL: '', RUTA: '', SUPERVISOR: '' };
-    const [filtersA, setFiltersA] = useState(emptyFilters);
-    const [filtersN, setFiltersN] = useState(emptyFilters);
+    const [filtersA, setFiltersA] = useState(emptyFilters); // Propuesta ANTERIOR
+    const [filtersN, setFiltersN] = useState(emptyFilters); // Propuesta NUEVA
 
-    // --- Función centralizada para procesar el Excel en crudo ---
+    // --- Procesa el Excel en crudo (centralizado) ---
     const processExcelBuffer = (buffer) => {
         const wb = window.XLSX.read(buffer, { type: 'array' });
         const raw = { bNuevas: [], dNuevas: [], bViejas: [], dViejas: [] };
-        
         wb.SheetNames.forEach((sn) => {
             const sd = window.XLSX.utils.sheet_to_json(wb.Sheets[sn], { defval: '' });
             if (!sd.length) return;
@@ -281,55 +280,38 @@ function Dashboard({ scriptsLoaded, onHome }) {
                 else raw.bViejas = raw.bViejas.concat(sd);
             }
         });
-        
         setDataState(raw);
         setFiltersA(emptyFilters);
         setFiltersN(emptyFilters);
     };
 
-    // =========================================================
-    //  NUEVO: Auto-carga del Excel usando Fetch al iniciar
-    // =========================================================
+    // --- Auto-carga del Excel (desde /datos.xlsx en la carpeta public) ---
     useEffect(() => {
-        // Solo ejecuta si los scripts (XLSX) ya cargaron y no se ha auto-cargado antes
         if (!scriptsLoaded || autoLoaded) return;
-
         const fetchExcel = async () => {
             try {
                 setIsLoading(true);
                 setStatus('⏳ Auto-cargando datos...');
-
-                // 📌 AQUI PONES LA RUTA DE TU EXCEL
-                // Si pones el excel en la carpeta "public" de Vercel, la ruta es "/datos.xlsx"
-                const fileUrl = '/datos.xlsx'; 
-                
-                // Añadimos '?t=' con la hora actual para FORZAR al navegador a no usar la caché
+                // 📌 Coloca tu Excel en /public/datos.xlsx
+                const fileUrl = '/datos.xlsx';
                 const response = await fetch(fileUrl + '?t=' + new Date().getTime());
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status} (No encontrado)`);
-                }
-
+                if (!response.ok) throw new Error(`HTTP ${response.status} (No encontrado)`);
                 const arrayBuffer = await response.arrayBuffer();
                 processExcelBuffer(arrayBuffer);
-
                 setStatus('✅ ¡Dashboard Auto-Alimentado!');
                 setTimeout(() => setStatus('Datos listos'), 3000);
             } catch (err) {
                 console.warn('Fallo auto-carga:', err);
-                // Ahora mostrará el error exacto en la pantalla al lado del botón
                 setStatus(`⚠️ Falló: ${err.message}`);
             } finally {
                 setIsLoading(false);
-                setAutoLoaded(true); // Evitar re-intentos
+                setAutoLoaded(true);
             }
         };
-
         fetchExcel();
     }, [scriptsLoaded, autoLoaded]);
 
-
-    // --- lectura del Excel (Plan B / Manual) ---
+    // --- lectura del Excel (manual / Plan B) ---
     const handleFileUpload = (e) => {
         const file = e.target.files[0];
         if (!file || !window.XLSX) return;
@@ -635,72 +617,165 @@ function KPICard({ title, valB, valA, format = 'num', inverse = false }) {
 }
 
 // =============================================================
-//  PORTADA / PANTALLA DE BIENVENIDA
+//  PORTADA / PANTALLA DE BIENVENIDA (con mapa de Colombia)
 // =============================================================
+const PORTADA_CIUDADES = [
+    { n: 'Bogotá', lat: 4.7110, lng: -74.0721, hub: true },
+    { n: 'Medellín', lat: 6.2442, lng: -75.5812, hub: true },
+    { n: 'Cali', lat: 3.4516, lng: -76.5320, hub: true },
+    { n: 'Barranquilla', lat: 10.9685, lng: -74.7813, hub: true },
+    { n: 'Cartagena', lat: 10.3910, lng: -75.4794 },
+    { n: 'Bucaramanga', lat: 7.1193, lng: -73.1227 },
+    { n: 'Cúcuta', lat: 7.8939, lng: -72.5078 },
+    { n: 'Ibagué', lat: 4.4389, lng: -75.2322 },
+    { n: 'Armenia', lat: 4.5339, lng: -75.6811 },
+    { n: 'Pereira', lat: 4.8133, lng: -75.6961 },
+    { n: 'Manizales', lat: 5.0703, lng: -75.5138 },
+    { n: 'Santa Marta', lat: 11.2408, lng: -74.1990 },
+    { n: 'Villavicencio', lat: 4.1420, lng: -73.6266 },
+    { n: 'Neiva', lat: 2.9273, lng: -75.2819 },
+    { n: 'Pasto', lat: 1.2136, lng: -77.2811 },
+];
+// Rutas decorativas (secuencias de índices de ciudad)
+const PORTADA_RUTAS = [
+    [0, 7, 8, 9, 10, 2, 14],
+    [0, 5, 6],
+    [1, 3, 4, 11],
+    [0, 1],
+    [0, 12, 13],
+];
+
+function PortadaMap() {
+    const mapRef = useRef(null);
+    const mapInstance = useRef(null);
+    useEffect(() => {
+        if (!window.L || !mapRef.current || mapInstance.current) return;
+        const map = window.L.map(mapRef.current, {
+            zoomControl: false, attributionControl: false, dragging: false,
+            scrollWheelZoom: false, doubleClickZoom: false, boxZoom: false,
+            keyboard: false, touchZoom: false, zoomSnap: 0.25,
+        });
+        mapInstance.current = map;
+        window.L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 19 }).addTo(map);
+
+        PORTADA_RUTAS.forEach((seq) => {
+            const pts = seq.map((i) => [PORTADA_CIUDADES[i].lat, PORTADA_CIUDADES[i].lng]);
+            window.L.polyline(pts, { color: '#56D400', weight: 2, opacity: 0.65, dashArray: '4 10', lineCap: 'round', className: 'pf-route', interactive: false }).addTo(map);
+        });
+
+        PORTADA_CIUDADES.forEach((c) => {
+            if (c.hub) {
+                window.L.circleMarker([c.lat, c.lng], { radius: 13, stroke: false, fillColor: '#56D400', fillOpacity: 0.18, className: 'pf-halo', interactive: false }).addTo(map);
+            }
+            window.L.circleMarker([c.lat, c.lng], { radius: c.hub ? 5 : 3, color: '#ffffff', weight: c.hub ? 1.5 : 1, fillColor: '#56D400', fillOpacity: 0.95, interactive: false }).addTo(map);
+            if (c.hub) {
+                window.L.marker([c.lat, c.lng], { interactive: false, icon: window.L.divIcon({ className: 'pf-label', html: `<span>${c.n}</span>`, iconSize: [0, 0] }) }).addTo(map);
+            }
+        });
+
+        const bounds = window.L.latLngBounds(PORTADA_CIUDADES.map((c) => [c.lat, c.lng]));
+        const fit = () => { map.invalidateSize(); map.fitBounds(bounds, { padding: [60, 60] }); };
+        fit();
+        window.addEventListener('resize', fit);
+        map._pfFit = fit;
+
+        return () => {
+            window.removeEventListener('resize', map._pfFit);
+            map.remove();
+            mapInstance.current = null;
+        };
+    }, []);
+    return <div ref={mapRef} className="absolute inset-0 w-full h-full" style={{ background: '#0b1120' }} />;
+}
+
 function Portada({ onEnter, scriptsLoaded }) {
     return (
-        <div className="min-h-screen relative overflow-hidden bg-slate-950 flex items-center justify-center p-6 font-sans">
+        <div className="min-h-screen relative overflow-hidden bg-slate-950 font-sans">
             <style>{`
                 @keyframes pf { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
-                @keyframes pg { 0%,100% { opacity: .45; } 50% { opacity: .9; } }
-                @keyframes pdash { to { stroke-dashoffset: 0; } }
+                @keyframes pfRoute { to { stroke-dashoffset: -56; } }
+                @keyframes pfHalo { 0%,100% { opacity: .12; } 50% { opacity: .42; } }
+                .pf-route { animation: pfRoute 1.6s linear infinite; }
+                .pf-halo { animation: pfHalo 3s ease-in-out infinite; }
+                .pf-label span {
+                    position: absolute; transform: translate(10px, -9px);
+                    font-size: 11px; font-weight: 600; letter-spacing: .02em;
+                    color: rgba(226,232,240,0.85); white-space: nowrap;
+                    text-shadow: 0 1px 4px rgba(0,0,0,0.95); pointer-events: none;
+                }
+                .leaflet-container { background: #0b1120 !important; }
             `}</style>
 
-            {/* atmósfera */}
-            <div className="absolute inset-0" style={{ background: 'radial-gradient(60% 60% at 50% 0%, rgba(86,212,0,0.18), transparent 70%), radial-gradient(40% 45% at 82% 92%, rgba(86,212,0,0.10), transparent 70%)' }} />
-            <div className="absolute -top-28 left-1/2 -translate-x-1/2 w-[520px] h-[520px] rounded-full blur-3xl" style={{ background: 'rgba(86,212,0,0.22)', animation: 'pg 5s ease-in-out infinite' }} />
-            <div className="absolute inset-0 opacity-[0.04]" style={{ backgroundImage: 'linear-gradient(#fff 1px, transparent 1px), linear-gradient(90deg, #fff 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
+            {/* MAPA DE FONDO */}
+            {scriptsLoaded ? <PortadaMap /> : <div className="absolute inset-0" style={{ background: '#0b1120' }} />}
 
-            {/* contenido */}
-            <div className="relative z-10 w-full max-w-3xl text-center flex flex-col items-center">
-                <div className="bg-white rounded-xl px-4 py-2 shadow-lg" style={{ animation: 'pf .6s ease-out both' }}>
-                    <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/c/ca/Haleon_logo.svg/1280px-Haleon_logo.svg.png" alt="Haleon" className="h-7" />
+            {/* velos para legibilidad */}
+            <div className="absolute inset-0 pointer-events-none" style={{ background: 'linear-gradient(90deg, rgba(2,6,23,0.96) 0%, rgba(2,6,23,0.85) 38%, rgba(2,6,23,0.35) 70%, rgba(2,6,23,0.12) 100%)' }} />
+            <div className="absolute inset-0 pointer-events-none" style={{ background: 'linear-gradient(180deg, rgba(2,6,23,0.7) 0%, transparent 22%, transparent 74%, rgba(2,6,23,0.88) 100%)' }} />
+            <div className="absolute -top-32 -left-24 w-[480px] h-[480px] rounded-full blur-3xl pointer-events-none" style={{ background: 'rgba(86,212,0,0.16)' }} />
+
+            {/* CONTENIDO */}
+            <div className="relative z-10 min-h-screen flex flex-col">
+                {/* top bar */}
+                <div className="flex items-center justify-between px-6 md:px-12 py-6" style={{ animation: 'pf .5s ease-out both' }}>
+                    <div className="bg-white rounded-lg px-3 py-1.5 shadow-lg">
+                        <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/c/ca/Haleon_logo.svg/1280px-Haleon_logo.svg.png" alt="Haleon" className="h-6" />
+                    </div>
+                    <div className="flex items-center gap-2 text-xs font-medium text-slate-300">
+                        <span className="w-2 h-2 rounded-full bg-[#56D400]" style={{ boxShadow: '0 0 10px #56D400' }} />
+                        {scriptsLoaded ? 'Entorno listo · datos en vivo' : 'Preparando entorno…'}
+                    </div>
                 </div>
 
-                {/* ruta decorativa */}
-                <svg viewBox="0 0 320 90" className="w-72 mt-10" style={{ animation: 'pf .7s ease-out both' }}>
-                    <path d="M20 70 C 80 70, 80 25, 140 25 S 240 70, 300 30" fill="none" stroke="#56D400" strokeWidth="2.5" strokeDasharray="6 6" strokeLinecap="round" style={{ strokeDashoffset: 220, animation: 'pdash 2s ease-out .4s forwards' }} />
-                    {[[20, 70], [140, 25], [300, 30]].map(([cx, cy], i) => (
-                        <g key={i}>
-                            <circle cx={cx} cy={cy} r="9" fill="#56D400" opacity="0.25" />
-                            <circle cx={cx} cy={cy} r="4.5" fill="#56D400" />
-                        </g>
-                    ))}
-                </svg>
+                {/* hero */}
+                <div className="flex-1 flex items-center px-6 md:px-12">
+                    <div className="max-w-2xl">
+                        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-semibold mb-6"
+                            style={{ background: 'rgba(86,212,0,0.10)', borderColor: 'rgba(86,212,0,0.30)', color: '#9bf06a', animation: 'pf .7s ease-out both' }}>
+                            <span className="w-1.5 h-1.5 rounded-full bg-[#56D400]" />
+                            OPTIMIZACIÓN DE RUTAS COMERCIALES
+                        </div>
+                        <h1 className="text-4xl md:text-6xl font-black text-white tracking-tight leading-[1.05]" style={{ animation: 'pf .8s ease-out both' }}>
+                            Comparativa de Rutas
+                            <span className="block text-[#56D400]">Antes <span className="text-slate-500 font-bold">vs.</span> Después</span>
+                        </h1>
+                        <p className="mt-6 text-lg md:text-xl text-slate-300 leading-relaxed max-w-xl" style={{ animation: 'pf .95s ease-out both' }}>
+                            Analiza, filtra y compara dos propuestas de cobertura comercial a nivel nacional:
+                            eficiencia, ocupación laboral y distribución geoespacial de cada usuario.
+                        </p>
 
-                <h1 className="mt-8 text-4xl md:text-5xl font-black text-white tracking-tight leading-tight" style={{ animation: 'pf .8s ease-out both' }}>
-                    Comparativa de Rutas
-                </h1>
-                <p className="mt-1 text-2xl md:text-3xl font-bold text-[#56D400]" style={{ animation: 'pf .9s ease-out both' }}>
-                    Antes <span className="text-slate-500 font-normal">vs.</span> Después
-                </p>
-                <p className="mt-5 max-w-xl text-slate-400 text-base md:text-lg leading-relaxed" style={{ animation: 'pf 1s ease-out both' }}>
-                    Visualiza, filtra y compara dos propuestas de optimización de rutas:
-                    eficiencia, ocupación laboral y cobertura geoespacial de cada usuario.
-                </p>
+                        <div className="mt-7 flex flex-wrap gap-3" style={{ animation: 'pf 1.1s ease-out both' }}>
+                            {['Filtros independientes', 'Mapas por usuario', 'KPIs comparativos'].map((t) => (
+                                <span key={t} className="px-4 py-2 rounded-full text-sm font-medium text-slate-200 bg-white/5 border border-white/10 backdrop-blur">
+                                    {t}
+                                </span>
+                            ))}
+                        </div>
 
-                <div className="mt-8 flex flex-wrap justify-center gap-3" style={{ animation: 'pf 1.1s ease-out both' }}>
-                    {['Filtros independientes', 'Mapas por usuario', 'KPIs comparativos'].map((t) => (
-                        <span key={t} className="px-4 py-2 rounded-full text-sm font-medium text-slate-200 bg-white/5 border border-white/10 backdrop-blur">
-                            {t}
-                        </span>
-                    ))}
+                        <div className="mt-10 flex flex-wrap items-center gap-4" style={{ animation: 'pf 1.25s ease-out both' }}>
+                            <button
+                                onClick={onEnter}
+                                className="px-9 py-4 rounded-xl bg-[#56D400] text-black font-extrabold text-lg shadow-[0_10px_40px_-10px_rgba(86,212,0,0.7)] hover:scale-105 hover:shadow-[0_16px_55px_-10px_rgba(86,212,0,0.95)] transition-all duration-200"
+                            >
+                                Entrar al Dashboard →
+                            </button>
+                            <span className="text-sm text-slate-400">Cobertura nacional · Colombia</span>
+                        </div>
+                    </div>
                 </div>
 
-                <button
-                    onClick={onEnter}
-                    className="mt-10 px-9 py-4 rounded-xl bg-[#56D400] text-black font-extrabold text-lg shadow-[0_10px_40px_-10px_rgba(86,212,0,0.7)] hover:scale-105 hover:shadow-[0_16px_50px_-10px_rgba(86,212,0,0.9)] transition-all duration-200"
-                    style={{ animation: 'pf 1.2s ease-out both' }}
-                >
-                    Entrar al Dashboard →
-                </button>
-                <p className="mt-4 text-xs text-slate-500" style={{ animation: 'pf 1.3s ease-out both' }}>
-                    {scriptsLoaded ? 'Entorno listo · carga automática activada' : 'Preparando entorno…'}
-                </p>
-            </div>
-
-            <div className="absolute bottom-4 left-0 right-0 text-center text-[11px] text-slate-600">
-                Haleon · Análisis de Rutas
+                {/* footer mini-stats */}
+                <div className="px-6 md:px-12 py-6 border-t border-white/5" style={{ animation: 'pf 1.4s ease-out both' }}>
+                    <div className="flex flex-wrap items-end gap-8 md:gap-12">
+                        {[['2', 'Propuestas comparadas'], ['Antes / Después', 'Escenarios'], ['Tiempo real', 'Filtros y mapas']].map(([big, small]) => (
+                            <div key={small}>
+                                <div className="text-xl md:text-2xl font-black text-white">{big}</div>
+                                <div className="text-xs text-slate-400 mt-0.5">{small}</div>
+                            </div>
+                        ))}
+                        <div className="ml-auto text-[11px] text-slate-600">Haleon · Análisis de Rutas</div>
+                    </div>
+                </div>
             </div>
         </div>
     );
